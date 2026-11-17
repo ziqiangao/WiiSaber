@@ -1,0 +1,26 @@
+{
+  "configurations": [
+    {
+      "name": "Wii (devkitPPC/libogc)",
+      "compilerPath": "/opt/devkitpro/devkitPPC/bin/powerpc-eabi-g++",
+      "compilerArgs": [
+        "-DGEKKO",
+        "-mrvl",
+        "-mcpu=750",
+        "-meabi",
+        "-mhard-float"
+      ],
+      "includePath": [
+        "${workspaceFolder}/src",
+        "/opt/devkitpro/libogc/include",
+        "/opt/devkitpro/devkitPPC/powerpc-eabi/include"
+      ],
+      "defines": [
+        "GEKKO"
+      ],
+      "cStandard": "c17",
+      "cppStandard": "gnu++17"
+    }
+  ],
+  "version": 4
+}
