@@ -13,8 +13,11 @@ namespace BeatScene {
 class DefaultEnvironmentAnimationCallbacks : public EnvironmentAnimationCallbacks {
 public:
 	DefaultEnvironmentAnimationCallbacks();
+	// Cache the imported scene and renderer, and attach this environment's lights.
 	void Bind(Wire::Node *scene, Wire::Renderer *renderer);
+	// Declare which Beat Saber event IDs this environment supports.
 	void RegisterLane(UInt id, AnimationLaneKind kind);
+	// Declare GLS group/type IDs and map GLS object IDs to exported node names.
 	void RegisterGLSGroup(UInt id, const UInt *types, UInt typeCount,
 		const GLSObjectRegistration *objects, UInt objectCount);
 	virtual const AnimationLaneRegistration *GetLanes(UInt &count) const;
@@ -34,6 +37,8 @@ public:
 	virtual void AnimationUpdate();
 
 private:
+	// Bound engine objects used by callbacks; these pointers are owned by the
+	// scene/renderer lifecycle, not by the beatmap parser.
 	Wire::Node *mpScene;
 	Wire::Renderer *mpRenderer;
 	Wire::Light *mpEffectLight;
@@ -41,6 +46,7 @@ private:
 	Wire::ColorRGB mKeyLight;
 	Wire::Vector3F mKeyDirection;
 	Bool mRenderStateDirty;
+	// Current color-lane state feeds the colored fill light and supports resets.
 	Wire::ColorRGB mLaneColors[20];
 	Float mLaneBrightness[20];
 	AnimationLaneRegistration mLanes[20];

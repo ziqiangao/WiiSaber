@@ -10,12 +10,15 @@ enum AnimationLaneKind {
 	ANIMATION_LANE_FLOAT_FX
 };
 
+// Basic event registration: id is the Beat Saber lane/event type, kind says
+// whether it dispatches a color value or a Float FX value.
 struct AnimationLaneRegistration {
 	UInt id;
 	AnimationLaneKind kind;
 };
 
 struct GLSObjectRegistration {
+	// Beat Saber GLS object ID paired with the exported scene node name.
 	UInt id;
 	const Char *nodeName;
 };
@@ -31,12 +34,15 @@ struct GLSGroupRegistration {
 class EnvironmentAnimationCallbacks {
 public:
 	virtual ~EnvironmentAnimationCallbacks() {}
+	// Environments override these registries; the runner queries them before
+	// dispatching events so it can support environment-specific IDs.
 	virtual const AnimationLaneRegistration *GetLanes(UInt &count) const {
 		count = 0; return NULL;
 	}
 	virtual const GLSGroupRegistration *GetGLSGroups(UInt &count) const {
 		count = 0; return NULL;
 	}
+	// Event hooks receive parsed map events; AnimationUpdate runs once per frame.
 	virtual void Reset() {}
 	virtual void GLSFloatFXCallback(UInt group, UInt id, Float value) {}
 	virtual void GLSTransformCallback(UInt group, UInt id,

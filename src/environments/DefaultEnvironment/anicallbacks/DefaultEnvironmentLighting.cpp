@@ -13,6 +13,8 @@ namespace BeatScene {
 
 namespace {
 
+// Map basic color lane IDs to the exported light nodes they control. Keep the
+// names and counts aligned with the lane IDs registered in DefaultEnvironment.cpp.
 static const Char *TargetName(UInt lane, UInt index) {
 	static const Char *names[][5] = {
 		{"RotatingLasersPair", "RotatingLasersPair (1)", "RotatingLasersPair (2)", "RotatingLasersPair (3)"},
@@ -31,6 +33,8 @@ static UInt TargetCount(UInt lane) {
 }
 
 static ColorRGB DriveLightColor(Float red, Float green, Float blue) {
+	// Raise light-object color above normal display range and tint bright colors
+	// toward white to approximate overdrive on the Wii's fixed-function renderer.
 	if (red < 0.0F) red = 0.0F; else if (red > 1.0F) red = 1.0F;
 	if (green < 0.0F) green = 0.0F; else if (green > 1.0F) green = 1.0F;
 	if (blue < 0.0F) blue = 0.0F; else if (blue > 1.0F) blue = 1.0F;
@@ -64,6 +68,8 @@ static StateMaterial *GetLightMaterialState(Node *node) {
 	for (UInt i = 0; i < gLightStateCount; ++i)
 		if (gLightNodes[i] == node) return gLightStates[i];
 	if (gLightStateCount >= MAX_LIGHT_MATERIAL_STATES) return NULL;
+	// Give each node its own material state so instances sharing mesh resources
+	// can still be lit independently.
 	StateMaterial *state = WIRE_NEW StateMaterial;
 	StateMaterial *previous = DynamicCast<StateMaterial>(node->GetState(State::MATERIAL));
 	if (previous) state->Ambient = previous->Ambient;
@@ -76,6 +82,7 @@ static StateMaterial *GetLightMaterialState(Node *node) {
 static void AddLightHalo(Node *lightNode) {
 	if (IsHaloNode(lightNode) || gHaloNodeCount >= MAX_LIGHT_MATERIAL_STATES ||
 		!lightNode->GetRenderObject()) return;
+	// Draw a larger, additive copy of the light mesh as a simple halo effect.
 	Node *halo = WIRE_NEW Node;
 	halo->SetRenderObject(WIRE_NEW RenderObject(lightNode->GetRenderObject()));
 	halo->Local.SetScale(Vector3F(3.0F, 1.12F, 3.0F));
@@ -120,6 +127,7 @@ static UInt SetSubtreeColor(Spatial *spatial, Float red, Float green,
 
 static UInt SetNamedColor(Node *scene, const Char *name, Float red,
 	Float green, Float blue, Renderer *renderer) {
+	// Find every matching exported name, then color renderable descendants.
 	if (!scene || !name || !*name) return 0;
 	if (red < 0.0F) red = 0.0F; else if (red > 1.0F) red = 1.0F;
 	if (green < 0.0F) green = 0.0F; else if (green > 1.0F) green = 1.0F;
@@ -136,6 +144,8 @@ static UInt SetNamedColor(Node *scene, const Char *name, Float red,
 
 void DefaultEnvironmentAnimationCallbacks::ColourEventLaneCallback(
 	UInt lane, ColorRGB colour, Float brightness) {
+	// This is called when a lane changes, including per-frame fade/flash updates.
+	// Store its state for the scene fill light, then apply it to the mapped nodes.
 	if (lane >= 20) return;
 	if (brightness < 0.0F) brightness = 0.0F;
 	if (brightness > 1.0F) brightness = 1.0F;
