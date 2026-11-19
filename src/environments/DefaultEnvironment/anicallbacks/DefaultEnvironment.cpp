@@ -9,9 +9,14 @@ using namespace Wire;
 namespace BeatScene {
 
 DefaultEnvironmentAnimationCallbacks::DefaultEnvironmentAnimationCallbacks()
-	: mpScene(NULL), mpRenderer(NULL), mAmbientLight(0.12F, 0.12F, 0.12F, 1.0F),
+	: mpScene(NULL), mpRenderer(NULL), mpEffectLight(NULL),
+	  mAmbientLight(0.05F, 0.05F, 0.05F, 1.0F),
 	  mKeyLight(0.75F, 0.78F, 0.9F), mKeyDirection(0.2F, -1.0F, -0.3F),
 	  mRenderStateDirty(false), mLaneCount(0), mGLSGroupCount(0) {
+	for (UInt i = 0; i < 20; ++i) {
+		mLaneColors[i] = ColorRGB::BLACK;
+		mLaneBrightness[i] = 0.0F;
+	}
 	for (UInt id = 0; id <= 4; ++id) RegisterLane(id, ANIMATION_LANE_COLOUR);
 	RegisterLane(8, ANIMATION_LANE_FLOAT_FX);
 	RegisterLane(9, ANIMATION_LANE_FLOAT_FX);
@@ -71,13 +76,30 @@ void DefaultEnvironmentAnimationCallbacks::Bind(Node *scene, Renderer *renderer)
 	light->Direction = mKeyDirection;
 	light->Direction.Normalize();
 	if (mpScene) mpScene->AttachLight(light);
+	mpEffectLight = WIRE_NEW Light(Light::LT_POINT);
+	mpEffectLight->Position = Vector3F(0.0F, 2.6F, 5.0F);
+	mpEffectLight->Color = ColorRGB::BLACK;
+	mpEffectLight->Constant = 0.28F;
+	mpEffectLight->Linear = 0.035F;
+	mpEffectLight->Quadric = 0.004F;
+	mpEffectLight->Enabled = false;
+	if (mpScene) mpScene->AttachLight(mpEffectLight);
 }
 
 ColorRGB DefaultEnvironmentAnimationCallbacks::PrimaryColor() { return ColorRGB(0.20F, 0.48F, 1.0F); }
 ColorRGB DefaultEnvironmentAnimationCallbacks::SecondaryColor() { return ColorRGB(1.0F, 0.12F, 0.32F); }
 ColorRGB DefaultEnvironmentAnimationCallbacks::WhiteColor() { return ColorRGB(1.0F, 1.0F, 1.0F); }
+ColorRGB DefaultEnvironmentAnimationCallbacks::BoostPrimaryColor() { return ColorRGB(0.85F, 0.12F, 0.9F); }
+ColorRGB DefaultEnvironmentAnimationCallbacks::BoostSecondaryColor() { return ColorRGB(0.05F, 0.95F, 0.72F); }
 
-void DefaultEnvironmentAnimationCallbacks::Reset() { mRenderStateDirty = false; }
+void DefaultEnvironmentAnimationCallbacks::Reset() {
+	mRenderStateDirty = false;
+	for (UInt i = 0; i < 20; ++i) {
+		mLaneColors[i] = ColorRGB::BLACK;
+		mLaneBrightness[i] = 0.0F;
+	}
+	if (mpEffectLight) mpEffectLight->Enabled = false;
+}
 
 void DefaultEnvironmentAnimationCallbacks::GLSColourCallback(UInt, UInt, UInt, Float) {}
 

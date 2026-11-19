@@ -11,7 +11,8 @@ namespace BeatScene {
 Bool LoadBeatmapCallbacks(const char *path,
 	const EnvironmentAnimationCallbacks &handler,
 	Wire::ColorRGB defaultColor0, Wire::ColorRGB defaultColor1,
-	Wire::ColorRGB defaultColorW);
+	Wire::ColorRGB defaultColorW, Wire::ColorRGB defaultBoostColor0,
+	Wire::ColorRGB defaultBoostColor1);
 void StartBeatmapCallbacks();
 void UpdateBeatmapCallbacks(EnvironmentAnimationCallbacks &callbacks,
 	Float elapsedSeconds, Float beatsPerMinute);

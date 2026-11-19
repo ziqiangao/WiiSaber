@@ -50,10 +50,11 @@ known start state; `AnimationUpdate()` runs once per rendered frame so an
 environment can advance ongoing effects. The beatmap parser dispatches events
 forward from beat zero without seeking.
 
-DefaultEnvironment currently handles basic and GLS color, translation, and
-rotation events. Float FX methods are extension hooks. The DefaultEnvironment
-ring lane uses four separate `NeonTubeBothSidesDirectional` light objects,
-matching the scene structure in ChroMapper's DefaultEnvironment.
+DefaultEnvironment currently applies basic color lanes and boost palettes to
+its named light meshes. Float FX and GLS callbacks are interface hooks; GLS
+event groups are not yet parsed or dispatched, and Float FX lanes do not yet
+animate the scene. See the [environment porting guide](src/environments/PORTING.md)
+for the implementation steps and current support boundary.
 
 ## Camera controls
 
@@ -68,7 +69,7 @@ Wire3D is included as an LGPL-3.0 submodule. Its source and license are in
 ```text
 src/
   app/                         Wii application entry point and frame loop
-  beatmap/                     Beatmap event parsing and playback
+  beatmap/                     Versioned event parsers and shared playback
   environment/                 Shared callback interfaces and demo scene
   environments/
     DefaultEnvironment/
@@ -80,3 +81,6 @@ src/
 Environment specific scene behavior belongs under its environment folder;
 shared event interfaces and beatmap playback stay independent of any one
 environment.
+
+See [the environment porting guide](src/environments/PORTING.md) for scene
+setup, callbacks, transforms, basic lighting, and GLS implementation notes.

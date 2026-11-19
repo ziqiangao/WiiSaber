@@ -1,12 +1,11 @@
 #include "DefaultEnvironment.h"
 
-#include "WireColor32.h"
-#include "WireMesh.h"
+#include "WireLight.h"
 #include "WireNode.h"
 #include "WireRenderObject.h"
 #include "WireRenderer.h"
+#include "WireStateAlpha.h"
 #include "WireStateMaterial.h"
-#include "WireVertexBuffer.h"
 
 using namespace Wire;
 
@@ -31,10 +30,35 @@ static UInt TargetCount(UInt lane) {
 	return lane < 5 ? counts[lane] : 0;
 }
 
+static ColorRGB DriveLightColor(Float red, Float green, Float blue) {
+	if (red < 0.0F) red = 0.0F; else if (red > 1.0F) red = 1.0F;
+	if (green < 0.0F) green = 0.0F; else if (green > 1.0F) green = 1.0F;
+	if (blue < 0.0F) blue = 0.0F; else if (blue > 1.0F) blue = 1.0F;
+	const Float peak = red > green ? (red > blue ? red : blue) : (green > blue ? green : blue);
+	Float whiteMix = (peak * 1.5F - 1.0F) / 0.5F;
+	if (whiteMix < 0.0F) whiteMix = 0.0F;
+	if (whiteMix > 1.0F) whiteMix = 1.0F;
+	whiteMix *= 0.4F;
+	red = red * 1.5F > 1.0F ? 1.0F : red * 1.5F;
+	green = green * 1.5F > 1.0F ? 1.0F : green * 1.5F;
+	blue = blue * 1.5F > 1.0F ? 1.0F : blue * 1.5F;
+	return ColorRGB(red + (1.0F - red) * whiteMix,
+		green + (1.0F - green) * whiteMix,
+		blue + (1.0F - blue) * whiteMix);
+}
+
 enum { MAX_LIGHT_MATERIAL_STATES = 1024 };
 static Node *gLightNodes[MAX_LIGHT_MATERIAL_STATES];
 static StateMaterial *gLightStates[MAX_LIGHT_MATERIAL_STATES];
 static UInt gLightStateCount = 0;
+static Node *gHaloNodes[MAX_LIGHT_MATERIAL_STATES];
+static UInt gHaloNodeCount = 0;
+
+static Bool IsHaloNode(Node *node) {
+	for (UInt i = 0; i < gHaloNodeCount; ++i)
+		if (gHaloNodes[i] == node) return true;
+	return false;
+}
 
 static StateMaterial *GetLightMaterialState(Node *node) {
 	for (UInt i = 0; i < gLightStateCount; ++i)
@@ -49,32 +73,44 @@ static StateMaterial *GetLightMaterialState(Node *node) {
 	return state;
 }
 
+static void AddLightHalo(Node *lightNode) {
+	if (IsHaloNode(lightNode) || gHaloNodeCount >= MAX_LIGHT_MATERIAL_STATES ||
+		!lightNode->GetRenderObject()) return;
+	Node *halo = WIRE_NEW Node;
+	halo->SetRenderObject(WIRE_NEW RenderObject(lightNode->GetRenderObject()));
+	halo->Local.SetScale(Vector3F(3.0F, 1.12F, 3.0F));
+	StateAlpha *alpha = WIRE_NEW StateAlpha;
+	alpha->BlendEnabled = true;
+	alpha->SrcBlend = StateAlpha::SBM_SRC_ALPHA;
+	alpha->DstBlend = StateAlpha::DBM_ONE;
+	halo->AttachState(alpha);
+	StateMaterial *material = GetLightMaterialState(halo);
+	if (material) material->Ambient = ColorRGBA(1.0F, 1.0F, 1.0F, 0.28F);
+	gHaloNodes[gHaloNodeCount++] = halo;
+	lightNode->AttachChild(halo);
+}
+
 static UInt SetSubtreeColor(Spatial *spatial, Float red, Float green,
 	Float blue, Renderer *renderer) {
 	UInt changed = 0;
 	Node *node = DynamicCast<Node>(spatial);
 	if (!node) return 0;
 	if (node->GetRenderObject()) {
-		Mesh *mesh = node->GetRenderObject()->GetMesh();
-		if (mesh) {
-			VertexBuffer *vertices = mesh->GetVertexBuffer();
-			if (vertices && mesh->HasColor()) {
-				const Int r = static_cast<Int>(red * 255.0F);
-				const Int g = static_cast<Int>(green * 255.0F);
-				const Int b = static_cast<Int>(blue * 255.0F);
-				for (UInt i = 0; i < vertices->GetQuantity(); ++i)
-					vertices->Color4(i) = Color32(static_cast<UChar>(r),
-						static_cast<UChar>(g), static_cast<UChar>(b), 255);
-				if (renderer) renderer->Update(vertices);
-			} else {
-				StateMaterial *state = GetLightMaterialState(node);
-				if (state) {
-					state->Ambient = ColorRGBA(red, green, blue, state->Ambient.A());
-					++changed;
-				}
-			}
+		RenderObject *renderObject = node->GetRenderObject();
+		// Imported copies may share one RenderObject. Wire stores effective
+		// material state on that object, so give each colored instance its own.
+		if (renderObject->GetReferences() > 1) {
+			renderObject = WIRE_NEW RenderObject(renderObject);
+			node->SetRenderObject(renderObject);
 		}
+		StateMaterial *state = GetLightMaterialState(node);
+		if (state) {
+			state->Ambient = ColorRGBA(red, green, blue, state->Ambient.A());
+			++changed;
+		}
+		if (!IsHaloNode(node)) AddLightHalo(node);
 	}
+	if (IsHaloNode(node)) return changed;
 	for (UInt i = 0; i < node->GetQuantity(); ++i) {
 		Spatial *child = node->GetChild(i);
 		if (child) changed += SetSubtreeColor(child, red, green, blue, renderer);
@@ -100,16 +136,45 @@ static UInt SetNamedColor(Node *scene, const Char *name, Float red,
 
 void DefaultEnvironmentAnimationCallbacks::ColourEventLaneCallback(
 	UInt lane, ColorRGB colour, Float brightness) {
-	if (!mpScene) return;
+	if (lane >= 20) return;
 	if (brightness < 0.0F) brightness = 0.0F;
 	if (brightness > 1.0F) brightness = 1.0F;
 	const Float red = colour.R() * brightness;
 	const Float green = colour.G() * brightness;
 	const Float blue = colour.B() * brightness;
-	for (UInt i = 0; i < TargetCount(lane); ++i) {
-		const Char *targetName = TargetName(lane, i);
-		if (targetName && SetNamedColor(mpScene, targetName,
-			red, green, blue, mpRenderer)) mRenderStateDirty = true;
+	mLaneColors[lane] = colour;
+	mLaneBrightness[lane] = red + green + blue > 0.01F ? brightness : 0.0F;
+	if (mpScene) {
+		const ColorRGB driven = DriveLightColor(red, green, blue);
+		for (UInt i = 0; i < TargetCount(lane); ++i) {
+			const Char *targetName = TargetName(lane, i);
+			if (targetName && SetNamedColor(mpScene, targetName,
+				driven.R(), driven.G(), driven.B(),
+				mpRenderer)) mRenderStateDirty = true;
+		}
+	}
+	if (mpEffectLight) {
+		Float r = 0.0F, g = 0.0F, b = 0.0F, weight = 0.0F;
+		for (UInt i = 0; i < 20; ++i) {
+			const Float w = mLaneBrightness[i];
+			if (w <= 0.0F) continue;
+			r += mLaneColors[i].R() * w;
+			g += mLaneColors[i].G() * w;
+			b += mLaneColors[i].B() * w;
+			weight += w;
+		}
+		if (weight > 0.0F) {
+			// Average concurrent lanes, then lift the colored fill light so the
+			// environment receives a visible wash from active stage lights.
+			const Float gain = 1.6F;
+			mpEffectLight->Color = ColorRGB(
+				(r / weight) * gain > 1.0F ? 1.0F : (r / weight) * gain,
+				(g / weight) * gain > 1.0F ? 1.0F : (g / weight) * gain,
+				(b / weight) * gain > 1.0F ? 1.0F : (b / weight) * gain);
+			mpEffectLight->Enabled = true;
+		} else {
+			mpEffectLight->Enabled = false;
+		}
 	}
 }
 

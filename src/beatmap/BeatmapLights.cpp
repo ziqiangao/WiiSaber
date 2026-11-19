@@ -1,5 +1,6 @@
 #include "BeatmapLights.h"
 #include "AnimationCallbacks.h"
+#include "BeatmapParserInternal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,21 +10,11 @@
 namespace BeatScene {
 
 enum { MAX_JSON_TOKENS = 65536, MAX_CALLBACK_EVENTS = 8192, MAX_JSON_DEPTH = 48 };
-enum TokenType { TOKEN_OBJECT, TOKEN_ARRAY, TOKEN_STRING, TOKEN_PRIMITIVE };
-
-struct JsonToken { Int start, end, next; TokenType type; };
-struct ScheduledCallback {
-	Float beat;
-	UInt lane, value;
-	Wire::ColorRGB color;
-	Float brightness;
-	Bool floatFX;
-};
-
-static JsonToken gTokens[MAX_JSON_TOKENS];
-static ScheduledCallback gEvents[MAX_CALLBACK_EVENTS];
+BeatmapJsonToken gTokens[MAX_JSON_TOKENS];
+BeatmapScheduledEvent gEvents[MAX_CALLBACK_EVENTS];
 static Char gJson[1024 * 1024];
-static UInt gTokenCount = 0, gEventCount = 0, gNextEvent = 0;
+UInt gTokenCount = 0, gEventCount = 0;
+static UInt gNextEvent = 0;
 static Bool gLoaded = false;
 static Wire::ColorRGB gLaneColor[20];
 static Wire::ColorRGB gTweenStart[20], gTweenEnd[20];
@@ -32,6 +23,11 @@ static Wire::ColorRGB gFlashColor[20];
 static Float gFlashStartTime[20];
 static Bool gTweenActive[20], gFlashActive[20];
 static Bool gTweenFadeOut[20];
+static UInt gLanePaletteSlot[20];
+static Float gLaneBrightness[20];
+static Wire::ColorRGB gPalette0, gPalette1, gPaletteW;
+static Wire::ColorRGB gBoostPalette0, gBoostPalette1;
+static Bool gBoostActive = false;
 
 static void SkipSpace(const char *json, Int &pos) {
 	while (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\r' || json[pos] == '\n') ++pos;
@@ -41,7 +37,7 @@ static Int ParseValue(const char *json, Int &pos, Int depth) {
 	if (depth > MAX_JSON_DEPTH || gTokenCount >= MAX_JSON_TOKENS) return -1;
 	SkipSpace(json, pos);
 	const Int index = static_cast<Int>(gTokenCount++);
-	JsonToken &token = gTokens[index];
+	BeatmapJsonToken &token = gTokens[index];
 	token.start = pos; token.end = pos; token.next = index + 1;
 	if (json[pos] == '{' || json[pos] == '[') {
 		const Char close = json[pos++] == '{' ? '}' : ']';
@@ -71,13 +67,13 @@ static Int ParseValue(const char *json, Int &pos, Int depth) {
 	return index;
 }
 
-static Bool TokenEquals(const char *json, const JsonToken &token, const char *text) {
+static Bool TokenEquals(const char *json, const BeatmapJsonToken &token, const char *text) {
 	const Int length = token.end - token.start;
 	return token.type == TOKEN_STRING && static_cast<Int>(strlen(text)) == length &&
 		memcmp(json + token.start, text, length) == 0;
 }
 
-static Int FindKey(const char *json, Int objectIndex, const char *name) {
+Int FindKey(const char *json, Int objectIndex, const char *name) {
 	if (objectIndex < 0 || gTokens[objectIndex].type != TOKEN_OBJECT) return -1;
 	for (Int i = objectIndex + 1; i < gTokens[objectIndex].next;) {
 		const Int key = i;
@@ -89,7 +85,7 @@ static Int FindKey(const char *json, Int objectIndex, const char *name) {
 	return -1;
 }
 
-static Float TokenFloat(const char *json, Int index, Float fallback) {
+Float TokenFloat(const char *json, Int index, Float fallback) {
 	if (index < 0) return fallback;
 	Char value[32];
 	Int length = gTokens[index].end - gTokens[index].start;
@@ -100,7 +96,7 @@ static Float TokenFloat(const char *json, Int index, Float fallback) {
 	return static_cast<Float>(atof(value));
 }
 
-static Int TokenInt(const char *json, Int index, Int fallback) {
+Int TokenInt(const char *json, Int index, Int fallback) {
 	if (index < 0) return fallback;
 	Char value[32];
 	Int length = gTokens[index].end - gTokens[index].start;
@@ -111,7 +107,17 @@ static Int TokenInt(const char *json, Int index, Int fallback) {
 	return atoi(value);
 }
 
-static Int FindAnyKey(const char *json, Int object, const char *primary,
+Bool TokenBool(const char *json, Int index, Bool fallback) {
+	if (index < 0) return fallback;
+	if (gTokens[index].type == TOKEN_PRIMITIVE) {
+		const Int length = gTokens[index].end - gTokens[index].start;
+		if (length == 4 && memcmp(json + gTokens[index].start, "true", 4) == 0) return true;
+		if (length == 5 && memcmp(json + gTokens[index].start, "false", 5) == 0) return false;
+	}
+	return TokenInt(json, index, fallback ? 1 : 0) != 0;
+}
+
+Int FindAnyKey(const char *json, Int object, const char *primary,
 	const char *alternate) {
 	const Int index = FindKey(json, object, primary);
 	return index >= 0 || !alternate ? index : FindKey(json, object, alternate);
@@ -124,8 +130,9 @@ static Wire::ColorRGB ReadColor(const char *json, Int object,
 	if (gTokens[color].type == TOKEN_STRING) {
 		Int start = gTokens[color].start;
 		Int length = gTokens[color].end - start;
-		if (length == 7 || length == 9) {
+		if (length == 6 || length == 7 || length == 8 || length == 9) {
 			if (json[start] == '#') { ++start; --length; }
+			if (length != 6 && length != 8) return fallback;
 			UInt channels[3] = {0, 0, 0};
 			for (UInt c = 0; c < 3; ++c) {
 				for (UInt n = 0; n < 2; ++n) {
@@ -152,8 +159,41 @@ static Wire::ColorRGB ReadColor(const char *json, Int object,
 		TokenFloat(json, g, fallback.G()), TokenFloat(json, b, fallback.B()));
 }
 
-static void ReadBeatmapColors(const char *beatmapPath,
-	Wire::ColorRGB &color0, Wire::ColorRGB &color1, Wire::ColorRGB &colorW) {
+static Int ArrayEntry(Int array, UInt entry) {
+	if (array < 0 || gTokens[array].type != TOKEN_ARRAY) return -1;
+	Int item = array + 1;
+	while (entry-- && item < gTokens[array].next) item = gTokens[item].next;
+	return item < gTokens[array].next ? item : -1;
+}
+
+static UInt FindColorSchemeIndex(const char *json, const Char *mapFilename) {
+	Int difficulties = FindKey(json, 0, "difficultyBeatmaps");
+	if (difficulties >= 0 && gTokens[difficulties].type == TOKEN_ARRAY) {
+		for (Int i = difficulties + 1; i < gTokens[difficulties].next; i = gTokens[i].next) {
+			Int filename = FindAnyKey(json, i, "beatmapDataFilename", "beatmapFilename");
+			if (filename < 0) filename = FindKey(json, i, "_beatmapFilename");
+			if (filename < 0 || !TokenEquals(json, gTokens[filename], mapFilename)) continue;
+			Int index = FindAnyKey(json, i, "beatmapColorSchemeIdx", "_beatmapColorSchemeIdx");
+			return static_cast<UInt>(TokenInt(json, index, 0));
+		}
+	}
+	const Int sets = FindKey(json, 0, "_difficultyBeatmapSets");
+	if (sets >= 0 && gTokens[sets].type == TOKEN_ARRAY) {
+		for (Int s = sets + 1; s < gTokens[sets].next; s = gTokens[s].next) {
+			const Int maps = FindKey(json, s, "_difficultyBeatmaps");
+			if (maps < 0 || gTokens[maps].type != TOKEN_ARRAY) continue;
+			for (Int i = maps + 1; i < gTokens[maps].next; i = gTokens[i].next) {
+				const Int filename = FindKey(json, i, "_beatmapFilename");
+				if (filename < 0 || !TokenEquals(json, gTokens[filename], mapFilename)) continue;
+				const Int index = FindKey(json, i, "_beatmapColorSchemeIdx");
+				return static_cast<UInt>(TokenInt(json, index, 0));
+			}
+		}
+	}
+	return 0;
+}
+
+static void ReadBeatmapColors(const char *beatmapPath) {
 	Char infoPath[256];
 	const Char *slash = strrchr(beatmapPath, '/');
 	if (!slash || static_cast<size_t>(slash - beatmapPath) + 10 >= sizeof(infoPath)) return;
@@ -171,87 +211,131 @@ static void ReadBeatmapColors(const char *beatmapPath,
 	Int schemes = FindAnyKey(gJson, 0, "_colorSchemes", "colorSchemes");
 	if (schemes < 0 || gTokens[schemes].type != TOKEN_ARRAY ||
 		schemes + 1 >= gTokens[schemes].next) return;
-	const Int entry = schemes + 1;
+	const Char *filename = strrchr(beatmapPath, '/') + 1;
+	UInt schemeIndex = FindColorSchemeIndex(gJson, filename);
+	Int entry = ArrayEntry(schemes, schemeIndex);
+	if (entry < 0) entry = schemes + 1;
 	const Int overrideLights = FindKey(gJson, entry, "overrideLights");
 	const Int useOverride = FindKey(gJson, entry, "useOverride");
-	if ((overrideLights >= 0 && TokenInt(gJson, overrideLights, 0) == 0) ||
-		(overrideLights < 0 && useOverride >= 0 && TokenInt(gJson, useOverride, 0) == 0)) return;
+	if ((overrideLights >= 0 && !TokenBool(gJson, overrideLights, true)) ||
+		(overrideLights < 0 && useOverride >= 0 && !TokenBool(gJson, useOverride, true))) return;
 	Int scheme = FindKey(gJson, entry, "colorScheme");
 	if (scheme < 0) scheme = entry;
 	Bool found = false;
-	color0 = ReadColor(gJson, scheme, "environmentColor0", color0, found);
-	color1 = ReadColor(gJson, scheme, "environmentColor1", color1, found);
-	colorW = ReadColor(gJson, scheme, "environmentColorW", colorW, found);
+	gPalette0 = ReadColor(gJson, scheme, "environmentColor0", gPalette0, found);
+	gPalette1 = ReadColor(gJson, scheme, "environmentColor1", gPalette1, found);
+	gPaletteW = ReadColor(gJson, scheme, "environmentColorW", gPaletteW, found);
+	gBoostPalette0 = ReadColor(gJson, scheme, "environmentColor0Boost", gBoostPalette0, found);
+	gBoostPalette1 = ReadColor(gJson, scheme, "environmentColor1Boost", gBoostPalette1, found);
 	if (found) printf("[WiiSaber] using beatmap-declared environment colors from %s\n", infoPath);
 }
 
-static void AddCallback(Float beat, UInt lane, UInt value,
-	Wire::ColorRGB color, Float brightness) {
-	if (gEventCount >= MAX_CALLBACK_EVENTS) return;
-	ScheduledCallback &event = gEvents[gEventCount++];
-	event.beat = beat; event.lane = lane; event.value = value; event.color = color;
-	event.brightness = brightness;
-	event.floatFX = false;
+static void ReadV4Lightshow(const char *beatmapPath,
+	const EnvironmentAnimationCallbacks &handler) {
+	Char infoPath[256], lightshowPath[256];
+	const Char *slash = strrchr(beatmapPath, '/');
+	if (!slash) return;
+	const size_t directoryLength = static_cast<size_t>(slash - beatmapPath) + 1;
+	if (directoryLength + 10 >= sizeof(infoPath)) return;
+	memcpy(infoPath, beatmapPath, directoryLength);
+	strcpy(infoPath + directoryLength, "Info.dat");
+	FILE *file = fopen(infoPath, "rb");
+	if (!file) return;
+	size_t length = fread(gJson, 1, sizeof(gJson) - 1, file);
+	fclose(file);
+	if (length == sizeof(gJson) - 1) return;
+	gJson[length] = '\0';
+	gTokenCount = 0;
+	Int pos = 0;
+	if (ParseValue(gJson, pos, 0) < 0) return;
+	Int difficulties = FindKey(gJson, 0, "difficultyBeatmaps");
+	if (difficulties < 0 || gTokens[difficulties].type != TOKEN_ARRAY) return;
+	const Char *mapFilename = slash + 1;
+	Int lightshowFilename = -1;
+	for (Int i = difficulties + 1; i < gTokens[difficulties].next; i = gTokens[i].next) {
+		const Int beatmapFilename = FindKey(gJson, i, "beatmapDataFilename");
+		if (beatmapFilename < 0 || !TokenEquals(gJson, gTokens[beatmapFilename], mapFilename)) continue;
+		lightshowFilename = FindKey(gJson, i, "lightshowDataFilename");
+		break;
+	}
+	if (lightshowFilename < 0 || gTokens[lightshowFilename].type != TOKEN_STRING) return;
+	const Int nameLength = gTokens[lightshowFilename].end - gTokens[lightshowFilename].start;
+	if (nameLength <= 0 || directoryLength + static_cast<size_t>(nameLength) >= sizeof(lightshowPath)) return;
+	memcpy(lightshowPath, beatmapPath, directoryLength);
+	memcpy(lightshowPath + directoryLength, gJson + gTokens[lightshowFilename].start, nameLength);
+	lightshowPath[directoryLength + nameLength] = '\0';
+	file = fopen(lightshowPath, "rb");
+	if (!file) {
+		printf("[WiiSaber] v4 lightshow missing: %s\n", lightshowPath);
+		return;
+	}
+	length = fread(gJson, 1, sizeof(gJson) - 1, file);
+	fclose(file);
+	if (length == sizeof(gJson) - 1) return;
+	gJson[length] = '\0';
+	gTokenCount = 0;
+	pos = 0;
+	if (ParseValue(gJson, pos, 0) < 0 || !gTokenCount || gTokens[0].type != TOKEN_OBJECT) return;
+	ParseBeatmapV4Events(gJson, 0, handler);
+	printf("[WiiSaber] v4 lightshow parsed: %s\n", lightshowPath);
 }
 
-static void AddFloatFXCallback(Float beat, UInt lane, Float value) {
+void QueueColorEvent(Float beat, UInt lane, UInt value, UInt paletteSlot,
+	Float brightness) {
 	if (gEventCount >= MAX_CALLBACK_EVENTS) return;
-	ScheduledCallback &event = gEvents[gEventCount++];
+	BeatmapScheduledEvent &event = gEvents[gEventCount++];
+	event.beat = beat; event.lane = lane; event.value = value;
+	event.color = Wire::ColorRGB(0.0F, 0.0F, 0.0F);
+	event.paletteSlot = paletteSlot;
+	event.brightness = brightness;
+	event.floatFX = event.colorBoost = event.boostEnabled = false;
+}
+
+void QueueFloatFXEvent(Float beat, UInt lane, Float value) {
+	if (gEventCount >= MAX_CALLBACK_EVENTS) return;
+	BeatmapScheduledEvent &event = gEvents[gEventCount++];
 	event.beat = beat; event.lane = lane;
 	event.value = static_cast<UInt>(value);
+	event.paletteSlot = 3;
 	event.color = Wire::ColorRGB(0.0F, 0.0F, 0.0F);
 	event.brightness = value;
 	event.floatFX = true;
+	event.colorBoost = event.boostEnabled = false;
 }
 
-static void AddBasicEvents(const char *json, Int arrayIndex,
-	Wire::ColorRGB color0, Wire::ColorRGB color1, Wire::ColorRGB colorW,
-	const EnvironmentAnimationCallbacks &handler) {
-	if (arrayIndex < 0 || gTokens[arrayIndex].type != TOKEN_ARRAY) return;
-	for (Int i = arrayIndex + 1; i < gTokens[arrayIndex].next &&
-		gEventCount < MAX_CALLBACK_EVENTS; i = gTokens[i].next) {
-		if (gTokens[i].type != TOKEN_OBJECT) continue;
-		const Int beatIndex = FindAnyKey(json, i, "_time", "b");
-		const Int typeIndex = FindAnyKey(json, i, "_type", "et");
-		const Int valueIndex = FindAnyKey(json, i, "_value", "i");
-		if (beatIndex < 0 || typeIndex < 0 || valueIndex < 0) continue;
-		const Int type = TokenInt(json, typeIndex, -1);
-		const Int value = TokenInt(json, valueIndex, -1);
-		const Float beat = TokenFloat(json, beatIndex, 0.0F);
-		if (type < 0 || type > 19 || value < 0) continue;
-		UInt laneCount = 0;
-		const AnimationLaneRegistration *lanes = handler.GetLanes(laneCount);
-		const AnimationLaneKind *kind = NULL;
-		for (UInt lane = 0; lanes && lane < laneCount; ++lane)
-			if (lanes[lane].id == static_cast<UInt>(type)) { kind = &lanes[lane].kind; break; }
-		if (!kind) continue;
-		if (*kind == ANIMATION_LANE_COLOUR && value <= 12) {
-			const Int brightnessIndex = FindAnyKey(json, i, "_floatValue", "f");
-			Wire::ColorRGB color(0.0F, 0.0F, 0.0F);
-			if (value > 0 && value <= 4) color = color0;
-			else if (value <= 8) color = color1;
-			else if (value <= 12) color = colorW;
-			AddCallback(beat, static_cast<UInt>(type), static_cast<UInt>(value),
-				color, TokenFloat(json, brightnessIndex, 1.0F));
-		} else if (*kind == ANIMATION_LANE_FLOAT_FX) {
-			AddFloatFXCallback(beat, static_cast<UInt>(type),
-				TokenFloat(json, valueIndex, 0.0F));
-		}
-	}
+void QueueColorBoostEvent(Float beat, Bool enabled) {
+	if (gEventCount >= MAX_CALLBACK_EVENTS) return;
+	BeatmapScheduledEvent &event = gEvents[gEventCount++];
+	event.beat = beat;
+	event.lane = event.value = event.paletteSlot = 0;
+	event.color = Wire::ColorRGB(0.0F, 0.0F, 0.0F);
+	event.brightness = 0.0F;
+	event.floatFX = false;
+	event.colorBoost = true;
+	event.boostEnabled = enabled;
 }
 
 Bool LoadBeatmapCallbacks(const char *path, const EnvironmentAnimationCallbacks &handler,
-	Wire::ColorRGB color0, Wire::ColorRGB color1, Wire::ColorRGB colorW) {
+	Wire::ColorRGB color0, Wire::ColorRGB color1, Wire::ColorRGB colorW,
+	Wire::ColorRGB boostColor0, Wire::ColorRGB boostColor1) {
 	gEventCount = gNextEvent = gTokenCount = 0;
 	gLoaded = false;
+	gPalette0 = color0;
+	gPalette1 = color1;
+	gPaletteW = colorW;
+	gBoostPalette0 = boostColor0;
+	gBoostPalette1 = boostColor1;
+	gBoostActive = false;
 	for (UInt lane = 0; lane < 20; ++lane) {
 		gLaneColor[lane] = Wire::ColorRGB(0.0F, 0.0F, 0.0F);
+		gLanePaletteSlot[lane] = 3;
+		gLaneBrightness[lane] = 0.0F;
 		gTweenActive[lane] = false;
 		gFlashActive[lane] = false;
 		gTweenFadeOut[lane] = false;
 	}
 	if (!path || !*path) return false;
-	ReadBeatmapColors(path, color0, color1, colorW);
+	ReadBeatmapColors(path);
 	FILE *file = fopen(path, "rb");
 	if (!file) {
 		printf("[WiiSaber] beatmap open failed: %s\n", path);
@@ -271,12 +355,29 @@ Bool LoadBeatmapCallbacks(const char *path, const EnvironmentAnimationCallbacks 
 		printf("[WiiSaber] beatmap JSON parse failed: %s\n", path);
 		return false;
 	}
-	Int basicEvents = FindAnyKey(gJson, 0, "_events", "basicBeatmapEvents");
-	AddBasicEvents(gJson, basicEvents, color0, color1, colorW, handler);
+	const Int version = FindKey(gJson, 0, "version");
+	const Bool isV4 = FindKey(gJson, 0, "basicEvents") >= 0 ||
+		(version >= 0 && gTokens[version].type == TOKEN_STRING &&
+		gTokens[version].end - gTokens[version].start > 0 &&
+		gJson[gTokens[version].start] == '4');
+	printf("[WiiSaber] beatmap parser: %s\n", isV4 ? "V4" : "V3/legacy");
+	if (isV4) {
+		ParseBeatmapV4Events(gJson, 0, handler);
+		ReadV4Lightshow(path, handler);
+	} else {
+		ParseBeatmapV3Events(gJson, 0, handler);
+	}
+	printf("[WiiSaber] palette normal=(%.2f,%.2f,%.2f)/(%.2f,%.2f,%.2f) boost=(%.2f,%.2f,%.2f)/(%.2f,%.2f,%.2f)\n",
+		gPalette0.R(), gPalette0.G(), gPalette0.B(),
+		gPalette1.R(), gPalette1.G(), gPalette1.B(),
+		gBoostPalette0.R(), gBoostPalette0.G(), gBoostPalette0.B(),
+		gBoostPalette1.R(), gBoostPalette1.G(), gBoostPalette1.B());
 	for (UInt i = 1; i < gEventCount; ++i) {
-		ScheduledCallback current = gEvents[i];
+		BeatmapScheduledEvent current = gEvents[i];
 		UInt j = i;
-		while (j > 0 && gEvents[j - 1].beat > current.beat) {
+		while (j > 0 && (gEvents[j - 1].beat > current.beat ||
+			(gEvents[j - 1].beat == current.beat && current.colorBoost &&
+			!gEvents[j - 1].colorBoost))) {
 			gEvents[j] = gEvents[j - 1];
 			--j;
 		}
@@ -289,8 +390,11 @@ Bool LoadBeatmapCallbacks(const char *path, const EnvironmentAnimationCallbacks 
 
 void StartBeatmapCallbacks() {
 	gNextEvent = 0;
+	gBoostActive = false;
 	for (UInt lane = 0; lane < 20; ++lane) {
 		gLaneColor[lane] = Wire::ColorRGB(0.0F, 0.0F, 0.0F);
+		gLanePaletteSlot[lane] = 3;
+		gLaneBrightness[lane] = 0.0F;
 		gTweenActive[lane] = false;
 		gFlashActive[lane] = false;
 		gTweenFadeOut[lane] = false;
@@ -302,6 +406,13 @@ static Wire::ColorRGB ScaleColor(Wire::ColorRGB color, Float brightness) {
 	if (brightness > 1.0F) brightness = 1.0F;
 	return Wire::ColorRGB(color.R() * brightness, color.G() * brightness,
 		color.B() * brightness);
+}
+
+static Wire::ColorRGB PaletteColor(UInt slot, Bool boost) {
+	if (slot == 0) return boost ? gBoostPalette0 : gPalette0;
+	if (slot == 1) return boost ? gBoostPalette1 : gPalette1;
+	if (slot == 2) return gPaletteW;
+	return Wire::ColorRGB(0.0F, 0.0F, 0.0F);
 }
 
 static void DispatchColor(EnvironmentAnimationCallbacks &callbacks, UInt lane,
@@ -327,14 +438,31 @@ void UpdateBeatmapCallbacks(EnvironmentAnimationCallbacks &callbacks,
 	if (!gLoaded || beatsPerMinute <= 0.0F) return;
 	const Float beat = elapsedSeconds * beatsPerMinute / 60.0F;
 	while (gNextEvent < gEventCount && gEvents[gNextEvent].beat <= beat) {
-		const ScheduledCallback &event = gEvents[gNextEvent++];
+		const BeatmapScheduledEvent &event = gEvents[gNextEvent++];
+		if (event.colorBoost) {
+			gBoostActive = event.boostEnabled;
+			for (UInt lane = 0; lane < 20; ++lane) {
+				const UInt slot = gLanePaletteSlot[lane];
+				if (slot > 1 || gLaneBrightness[lane] <= 0.0F) continue;
+				const Wire::ColorRGB color = ScaleColor(PaletteColor(slot, gBoostActive),
+					gLaneBrightness[lane]);
+				gLaneColor[lane] = color;
+				if (gFlashActive[lane]) gFlashColor[lane] = color;
+				if (gTweenActive[lane]) gTweenEnd[lane] = color;
+				callbacks.ColourEventLaneCallback(lane, color, 1.0F);
+			}
+			continue;
+		}
 		if (event.floatFX) {
 			callbacks.FloatFXEventLaneCallback(event.lane, event.brightness);
 			continue;
 		}
 		const Float eventTime = event.beat * 60.0F / beatsPerMinute;
 		const UInt mode = event.value == 0 ? 0 : (event.value - 1) % 4 + 1;
-		const Wire::ColorRGB color = ScaleColor(event.color, event.brightness);
+		gLanePaletteSlot[event.lane] = event.value == 0 ? 3 : event.paletteSlot;
+		gLaneBrightness[event.lane] = event.value == 0 ? 0.0F : event.brightness;
+		const Wire::ColorRGB color = ScaleColor(
+			PaletteColor(event.paletteSlot, gBoostActive), event.brightness);
 		if (mode == 0) {
 			gTweenActive[event.lane] = false;
 			gFlashActive[event.lane] = false;

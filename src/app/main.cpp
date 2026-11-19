@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <ogc/conf.h>
 #include <ogc/system.h>
 #include <wiiuse/wpad.h>
 
@@ -48,6 +49,11 @@ WIRE_REGISTER_INITIALIZE(WiiSaber);
 const Float WiiSaber::kBeatmapBpm = 166.0F;
 const Char *WiiSaber::kBeatmapPath = "sd:/apps/wiisaber/maps/AngelVoices/ExpertStandard.dat";
 
+static Float GetDisplayAspectRatio() {
+	return CONF_GetAspectRatio() == CONF_ASPECT_16_9
+		? (16.0F / 9.0F) : (4.0F / 3.0F);
+}
+
 Bool WiiSaber::OnInitialize() {
 	// Send stdout/stderr (including the startup diagnostics) to Dolphin's
 	// OSReport log so printf output is visible while running under Dolphin.
@@ -74,7 +80,9 @@ Bool WiiSaber::OnInitialize() {
 		*mpAnimationCallbacks,
 		BeatScene::DefaultEnvironmentAnimationCallbacks::PrimaryColor(),
 		BeatScene::DefaultEnvironmentAnimationCallbacks::SecondaryColor(),
-		BeatScene::DefaultEnvironmentAnimationCallbacks::WhiteColor());
+		BeatScene::DefaultEnvironmentAnimationCallbacks::WhiteColor(),
+		BeatScene::DefaultEnvironmentAnimationCallbacks::BoostPrimaryColor(),
+		BeatScene::DefaultEnvironmentAnimationCallbacks::BoostSecondaryColor());
 	BeatScene::StartBeatmapCallbacks();
 
 	mspScene->UpdateRS();
@@ -86,7 +94,9 @@ Bool WiiSaber::OnInitialize() {
 	direction.Normalize();
 	Vector3F up(0.0F, 1.0F, 0.0F);
 	mspCamera = WIRE_NEW Camera(location, direction, up);
-	mspCamera->SetFrustum(55.0F, GetWidthF() / GetHeightF(), 0.1F,
+	const Float displayAspect = GetDisplayAspectRatio();
+	printf("[WiiSaber] display aspect compensation: %.3f\n", displayAspect);
+	mspCamera->SetFrustum(55.0F, displayAspect, 0.1F,
 		1000.0F);
 	mCuller.SetCamera(mspCamera);
 	mStartTime = System::GetTime();

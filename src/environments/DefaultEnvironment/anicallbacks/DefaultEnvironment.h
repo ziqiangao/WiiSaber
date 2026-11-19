@@ -6,6 +6,7 @@
 #include "WireVector3.h"
 
 namespace Wire { class Node; class Renderer; }
+namespace Wire { class Light; }
 
 namespace BeatScene {
 
@@ -21,6 +22,8 @@ public:
 	static Wire::ColorRGB PrimaryColor();
 	static Wire::ColorRGB SecondaryColor();
 	static Wire::ColorRGB WhiteColor();
+	static Wire::ColorRGB BoostPrimaryColor();
+	static Wire::ColorRGB BoostSecondaryColor();
 	virtual void Reset();
 	virtual void GLSFloatFXCallback(UInt group, UInt id, Float value);
 	virtual void GLSTransformCallback(UInt group, UInt id, Float x, Float y, Float z);
@@ -33,10 +36,13 @@ public:
 private:
 	Wire::Node *mpScene;
 	Wire::Renderer *mpRenderer;
+	Wire::Light *mpEffectLight;
 	Wire::ColorRGBA mAmbientLight;
 	Wire::ColorRGB mKeyLight;
 	Wire::Vector3F mKeyDirection;
 	Bool mRenderStateDirty;
+	Wire::ColorRGB mLaneColors[20];
+	Float mLaneBrightness[20];
 	AnimationLaneRegistration mLanes[20];
 	UInt mLaneCount;
 	GLSGroupRegistration mGLSGroups[16];
