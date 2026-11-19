@@ -8,18 +8,38 @@
         "-mrvl",
         "-mcpu=750",
         "-meabi",
-        "-mhard-float"
+        "-mhard-float",
+        "-DWIRE_WII",
+        "-DNO_BULLET_PHYSICS_LIB",
+        "-DNO_FREETYPE2_LIB"
       ],
       "includePath": [
         "${workspaceFolder}/src",
+        "${workspaceFolder}/src/app",
+        "${workspaceFolder}/src/beatmap",
+        "${workspaceFolder}/src/environment",
+        "${workspaceFolder}/src/environment/demo",
+        "${workspaceFolder}/src/environments/DefaultEnvironment/anicallbacks",
+        "${workspaceFolder}/build",
+        "${workspaceFolder}/third_party/Wire3D/Wire/Foundation",
+        "${workspaceFolder}/third_party/Wire3D/Wire/Foundation/Wii",
+        "${workspaceFolder}/third_party/Wire3D/Wire/Engine",
+        "${workspaceFolder}/third_party/Wire3D/Wire/Renderer",
+        "${workspaceFolder}/third_party/Wire3D/Wire/Renderer/GX",
+        "${workspaceFolder}/third_party/Wire3D/Wire/InputSystem",
+        "${workspaceFolder}/third_party/Wire3D/Wire/InputSystem/Wii",
+        "${workspaceFolder}/third_party/Wire3D/Tools/Importer/src",
         "/opt/devkitpro/libogc/include",
         "/opt/devkitpro/devkitPPC/powerpc-eabi/include"
       ],
       "defines": [
-        "GEKKO"
+        "GEKKO",
+        "WIRE_WII",
+        "NO_BULLET_PHYSICS_LIB",
+        "NO_FREETYPE2_LIB"
       ],
       "cStandard": "c17",
-      "cppStandard": "gnu++17"
+      "cppStandard": "gnu++11"
     }
   ],
   "version": 4

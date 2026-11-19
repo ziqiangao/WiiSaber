@@ -1,23 +1,82 @@
 # WiiSaber
 
-A minimal Nintendo Wii homebrew starter project using devkitPPC and libogc.
-It builds `wiisaber.dol` and displays a text screen until START is pressed on
-the first connected GameCube controller.
+Wii homebrew scene viewer built with devkitPPC, libogc, and the Wire3D
+submodule. The active DefaultEnvironment scene and animation bindings are
+currently selected directly in C++.
 
-## Requirements
+## Build
 
-- devkitPro with the `devkitPPC` toolchain
-- libogc from the devkitPro Wii development package group
-
-On a devkitPro Linux installation, initialize the environment and build with:
+Initialize the Wire3D submodule after cloning:
 
 ```sh
+git submodule update --init --recursive
 source /etc/profile.d/devkit-env.sh
 make
 ```
 
-The resulting `wiisaber.dol` can be run from an SD card with a Wii homebrew
-loader. To use the Homebrew Channel's application browser, add `meta.xml` and
-an `icon.png` alongside the executable in an app folder.
+The build produces `wiisaber.dol` in the project root.
 
-Clean generated files with `make clean`.
+## Scene files
+
+Place the DefaultEnvironment Wire3D export and its assets here:
+
+```text
+sd:/apps/wiisaber/environments/DefaultEnvironment/DefaultEnvironment.xml
+sd:/apps/wiisaber/environments/DefaultEnvironment/<mesh and texture assets>
+```
+
+The beatmap path, BPM, and camera are set in `src/app/main.cpp`. Default
+lighting and event lane registrations are in
+`src/environments/DefaultEnvironment/anicallbacks/DefaultEnvironment.cpp`;
+the color lane to scene node bindings are in
+`src/environments/DefaultEnvironment/anicallbacks/DefaultEnvironmentLighting.cpp`.
+
+The DefaultEnvironment lighting handler defines its fallback light colors
+there. When `Info.dat` declares environment colors, the runner uses those colors
+for basic light events; maps without declared environment colors use the
+environment defaults.
+
+## Environment animation callbacks
+
+Beatmap events are dispatched through `EnvironmentAnimationCallbacks` in
+`src/environment/AnimationCallbacks.h`. An environment can subclass it and
+override `GLSFloatFXCallback(group, id, value)`,
+`GLSTransformCallback(group, id, x, y, z)`,
+`GLSRotationCallback(group, id, x, y, z)`,
+`GLSColourCallback(group, id, col, brightness)`,
+`FloatFXEventLaneCallback(lane, value)`, and
+`ColourEventLaneCallback(lane, colour, brightness)`. `Reset()` establishes the
+known start state; `AnimationUpdate()` runs once per rendered frame so an
+environment can advance ongoing effects. The beatmap parser dispatches events
+forward from beat zero without seeking.
+
+DefaultEnvironment currently handles basic and GLS color, translation, and
+rotation events. Float FX methods are extension hooks. The DefaultEnvironment
+ring lane uses four separate `NeonTubeBothSidesDirectional` light objects,
+matching the scene structure in ChroMapper's DefaultEnvironment.
+
+## Camera controls
+
+Use the Wii Remote D-pad to move forward/back and strafe, buttons **1/2** to
+turn, and **A/B** to move up/down.
+
+Wire3D is included as an LGPL-3.0 submodule. Its source and license are in
+`third_party/Wire3D`.
+
+## Source layout
+
+```text
+src/
+  app/                         Wii application entry point and frame loop
+  beatmap/                     Beatmap event parsing and playback
+  environment/                 Shared callback interfaces and demo scene
+  environments/
+    DefaultEnvironment/
+      anicallbacks/            handler registration and lighting bindings
+        DefaultEnvironment.cpp environment setup and event registry
+        DefaultEnvironmentLighting.cpp color lane scene bindings
+```
+
+Environment specific scene behavior belongs under its environment folder;
+shared event interfaces and beatmap playback stay independent of any one
+environment.
