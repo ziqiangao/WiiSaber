@@ -43,7 +43,7 @@ export VPATH    := $(PROJECT_ROOT)/src \
                    $(IMPORTER)
 export DEPSDIR  := $(PROJECT_ROOT)/$(BUILD)
 
-CPPFILES := main.cpp DefaultEnvironment.cpp DefaultEnvironmentLighting.cpp BeatmapLights.cpp BeatmapParserV3.cpp BeatmapParserV4.cpp scene.cpp Importer.cpp PicoPNG.cpp
+CPPFILES := main.cpp DefaultEnvironment.cpp LightingUtils.cpp BeatmapLights.cpp BeatmapParserV3.cpp BeatmapParserV4.cpp scene.cpp Importer.cpp PicoPNG.cpp
 CFILES   :=
 SFILES   :=
 

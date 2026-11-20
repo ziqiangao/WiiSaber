@@ -28,8 +28,9 @@ sd:/apps/wiisaber/environments/DefaultEnvironment/<mesh and texture assets>
 The beatmap path, BPM, and camera are set in `src/app/main.cpp`. Default
 lighting and event lane registrations are in
 `src/environments/DefaultEnvironment/anicallbacks/DefaultEnvironment.cpp`;
-the color lane to scene node bindings are in
-`src/environments/DefaultEnvironment/anicallbacks/DefaultEnvironmentLighting.cpp`.
+the color lane to scene node bindings are in that same file. Reusable
+overdrive coloring and halo rendering are in
+`src/environment/LightingUtils.cpp`.
 
 The DefaultEnvironment lighting handler defines its fallback light colors
 there. When `Info.dat` declares environment colors, the runner uses those colors
@@ -70,12 +71,12 @@ Wire3D is included as an LGPL-3.0 submodule. Its source and license are in
 src/
   app/                         Wii application entry point and frame loop
   beatmap/                     Versioned event parsers and shared playback
-  environment/                 Shared callback interfaces and demo scene
+  environment/                 Shared callbacks, demo scene, and lighting helpers
+    LightingUtils.cpp          shared overdrive coloring and light halos
   environments/
     DefaultEnvironment/
       anicallbacks/            handler registration and lighting bindings
-        DefaultEnvironment.cpp environment setup and event registry
-        DefaultEnvironmentLighting.cpp color lane scene bindings
+        DefaultEnvironment.cpp environment setup, event registry, and color bindings
 ```
 
 Environment specific scene behavior belongs under its environment folder;

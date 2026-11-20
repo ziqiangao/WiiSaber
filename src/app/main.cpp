@@ -74,7 +74,7 @@ Bool WiiSaber::OnInitialize() {
 		mspScene = BeatScene::CreateDefaultEnvironment();
 	}
 	mpAnimationCallbacks = new BeatScene::DefaultEnvironmentAnimationCallbacks;
-	mpAnimationCallbacks->Bind(mspScene, GetRenderer());
+	mpAnimationCallbacks->Bind(mspScene);
 	mpAnimationCallbacks->Reset();
 	BeatScene::LoadBeatmapCallbacks(kBeatmapPath,
 		*mpAnimationCallbacks,
@@ -148,7 +148,7 @@ void WiiSaber::OnIdle() {
 	const Float elapsed = static_cast<Float>(time - mStartTime);
 	BeatScene::UpdateEnvironment(mspScene, elapsed);
 	BeatScene::UpdateBeatmapCallbacks(*mpAnimationCallbacks, elapsed, kBeatmapBpm);
-	mpAnimationCallbacks->AnimationUpdate();
+	mpAnimationCallbacks->AnimationUpdate(deltaTime);
 	mspScene->UpdateGS(time);
 	mCuller.ComputeVisibleSet(mspScene);
 

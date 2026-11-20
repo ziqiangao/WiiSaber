@@ -54,7 +54,7 @@ public:
 	virtual void FloatFXEventLaneCallback(UInt lane, Float value) {}
 	virtual void ColourEventLaneCallback(UInt lane,
 		Wire::ColorRGB colour, Float brightness) {}
-	virtual void AnimationUpdate() {}
+	virtual void AnimationUpdate(Float deltaSeconds) {}
 };
 
 }

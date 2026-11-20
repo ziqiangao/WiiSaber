@@ -11,6 +11,23 @@ lanes `8`, `9`, `12`, and `13`. To add another color lane, register its ID as
 `ANIMATION_LANE_COLOUR` in `DefaultEnvironmentAnimationCallbacks`' constructor,
 then add the corresponding node bindings to `TargetName()` and `TargetCount()`.
 
+The stock Float FX animations are implemented for:
+
+- lane `8`: ring rotation, based on the ChroMapper DefaultEnvironment values
+- lane `9`: ring zoom/position interpolation
+- lane `12`: left laser rotation (`BaseL` pair nodes and `LightWrapper0`)
+- lane `13`: right laser rotation (`BaseR` pair nodes and `LightWrapper1`)
+
+Each cached laser pair has its own angle and speed so one pair's movement does
+not drive the others. The pair start angles/directions are deterministic
+approximations of ChroMapper's independently initialized pair effects.
+
+Ring movement is applied to individual `SmallTrackLaneRing(Clone)` and
+`BigTrackLaneRing(Clone)` nodes, ordered by local Z to match ChroMapper's
+serialized ring lists. It does not animate the ring-manager containers or use
+numbered object-name suffixes as ring indices. The handler preserves each
+node's authored transform and composes rotation over that transform.
+
 GLS animation targets use a separate registry. Call
 `RegisterGLSGroup(groupId, types, typeCount, objects, objectCount)` from the
 environment handler to store each supported group ID, its event type IDs, and
@@ -31,11 +48,16 @@ The DefaultEnvironment color bindings are in `DefaultEnvironment.cpp`, in
 
 | Lane ID | DefaultEnvironment target nodes |
 | --- | --- |
-| 0 | `RotatingLasersPair` and its `(1)` through `(3)` copies |
-| 1 | `NeonTubeBothSidesDirectional` and its `(1)` through `(3)` copies; these are the separate ring lights |
-| 2 | `DoubleColorLaserL` and its `(1)` through `(4)` copies |
-| 3 | `DoubleColorLaserR` and its `(1)` through `(4)` copies |
-| 4 | `FrontLights`, `NeonTubeL`, `NeonTubeR` |
+| 0 | `DoubleColorLaserL/R` and their `(1)` through `(4)` copies |
+| 1 | `NeonTubeBothSidesDirectional` and its `(1)` through `(3)` copies on the big rings |
+| 2 | `BaseL` subtrees, `NearBuildingLeft (1)/(2)`, and `NeonTubeL` |
+| 3 | `BaseR` subtrees, `NearBuildingRight (1)/(2)`, and `NeonTubeR` |
+| 4 | `FrontLights`, `BackColumnNeon`, and `DoubleColorLaserL/R` copies |
+
+The dispatched lane is the event type stored in the map (`_type`/`et` in V3
+or `t` in V4); it is not a ChroMapper `LightIntensityData.ID`. `BaseL`/`BaseR`
+and the building nodes are subtree targets because their light objects are
+nested below those transforms.
 
 ## Add or change a color lane
 
@@ -64,7 +86,7 @@ The existing map conventions include `8` for ring rotation, `9` for ring zoom,
 `12` for left laser rotation, and `13` for right laser rotation. Add handling
 for the ID in `DefaultEnvironmentAnimationCallbacks::FloatFXEventLaneCallback`
 in `DefaultEnvironment.cpp`. Store the desired animation state in the handler,
-then advance it from `AnimationUpdate()`, which the main loop calls once per
+then advance it from `AnimationUpdate(deltaSeconds)`, which the main loop calls once per
 frame. The runner delivers Float FX callbacks when events occur; it does not
 interpolate those values for you.
 
